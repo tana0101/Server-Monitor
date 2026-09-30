@@ -1,0 +1,370 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8"/>
+    <title>Server Monitor</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <style>
+      body { font-family: Arial, Helvetica, sans-serif; margin: 16px; }
+      .server { border: 1px solid #ddd; padding: 12px; margin-bottom: 12px; border-radius: 6px; }
+      .kv { margin: 4px 0; }
+      .kv b { display:inline-block; width: 130px; }
+      .gpu-grid { display: grid; gap: 12px; }
+      .gpu-card {
+        border: 1px solid #eee;
+        border-radius: 6px;
+        padding: 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;            /* 元件之間留點間距 */
+        height: auto;        /* 讓高度自動撐開 */
+      }
+      .chart-box {
+        height: 180px;       /* 圖表固定高度，你可改 160~220px */
+      }
+      .gpu-card canvas.gpu-chart {
+        width: 100%;
+        height: 100%;
+        display: block;      /* 避免行內元素造成額外空隙 */
+      }
+      .proc-list { margin-top: 2px; }
+      .proc-list code { background:#f5f5f5; padding:0 4px; border-radius:3px; }
+      .status-online  { color: #16a34a; font-weight: 700; } /* 綠色粗體 */
+      .status-offline { color: #dc2626; font-weight: 700; } /* 紅色粗體 */
+    </style>
+  </head>
+  <body>
+    <h2>Server Monitor</h2>
+    <div id="servers"></div>
+
+    <script>
+      const socket = io({ transports: ["websocket", "polling"] });
+      const store = {}; // {server: {card, gpuCharts: [Chart,...]}}
+      const OFFLINE_SECS = 20; // 超過這個秒數沒有更新就視為離線，可依你的後端 POLL_INTERVAL 調整
+
+      function createServerCard(name, serverData) {
+        const card = document.createElement('div');
+        card.className = 'server';
+        card.id = 'srv-' + name;
+
+        card.innerHTML = `
+          <h3>${name}</h3>
+          <div class="kv"><b>Status:</b> <span class="status">-</span></div>
+          <div class="kv"><b>Last Date:</b> <span class="last-date">-</span></div>
+          <div class="kv"><b>Last Time:</b> <span class="last-time">-</span></div>
+          <div class="kv"><b>CPU usage:</b> <span class="cpu">-</span></div>
+          <div class="kv"><b>Memory:</b> <span class="mem">-</span></div>
+          <div class="kv"><b>Disk total/used:</b> <span class="disk">-</span></div>
+          <div class="kv"><b>GPUs:</b> <span class="gpus">-</span></div>
+          <div class="gpu-grid"></div>
+        `;
+        document.getElementById('servers').appendChild(card);
+
+        store[name] = { card, gpuCharts: [] };
+        renderGpuCanvases(name, (serverData?.gpus || []).length);
+      }
+
+      function renderStatus(card, isOnline) {
+        const el = card.querySelector('.status');
+        if (!el) return;
+        el.classList.remove('status-online', 'status-offline');
+        if (isOnline) {
+          el.textContent = '🟢 上線';
+          el.classList.add('status-online');
+        } else {
+          el.textContent = '🔴 離線';
+          el.classList.add('status-offline');
+        }
+      }
+      
+      function renderGpuCanvases(name, gpuCount) {
+        const st = store[name];
+        const wrap = st.card.querySelector('.gpu-grid');
+
+        if (st.gpuCharts && st.gpuCharts.length) {
+          st.gpuCharts.forEach(chart => {
+            if (chart) chart.destroy();
+          });
+        }
+
+        wrap.innerHTML = '';
+        st.gpuCharts = [];
+            
+        // 沒 GPU 的情況
+        if (!gpuCount || gpuCount <= 0) {
+          wrap.style.gridTemplateColumns = '1fr';
+          wrap.innerHTML = `<div class="gpu-card">No GPU detected</div>`;
+          return;
+        }
+      
+        // 依 GPU 數量決定欄數（1 顆=1欄，2 顆=2欄，…）
+        wrap.style.gridTemplateColumns = `repeat(${Math.min(gpuCount, 3)}, 1fr)`; // 最多三欄，超過自動換行
+      
+        for (let i = 0; i < gpuCount; i++) {
+          const holder = document.createElement('div');
+          holder.className = 'gpu-card';
+          holder.innerHTML = `
+            <div class="gpu-card">
+              <div><b>GPU ${i}</b> <span class="gpu-name-${i}"></span></div>
+              <div class="kv" style="font-size:13px;">
+                <b>Util:</b> <span class="gpu-util-${i}">-</span>
+              </div>
+              <div class="kv" style="font-size:13px;">
+                <b>Power:</b> <span class="gpu-power-${i}">-</span>
+              </div>
+              <div class="chart-box">
+                <canvas class="gpu-chart"></canvas>
+              </div>
+              <div class="proc-list proc-list-${i}"></div>
+            </div>
+          `;
+          wrap.appendChild(holder);
+        
+          // 讓圖表自適應卡片寬度
+          const ctx = holder.querySelector('canvas').getContext('2d');
+          const chart = new Chart(ctx, {
+            type: 'line',
+            data: { labels: [], datasets: [{ label: `GPU${i} memory (MB)`, data: [], fill: false }] },
+            options: {
+              animation: false,
+              responsive: true,
+              maintainAspectRatio: false, // 高度用 CSS 控
+              scales: { x: { display: true }, y: { beginAtZero: true } }
+            }
+          });
+          st.gpuCharts.push(chart);
+        }
+      }
+      
+      
+      function makeTimeLabel(ts) {
+        const d = new Date(ts);
+        // 24h: HH:MM:SS.mmm ；要 12h 就改成 d.toLocaleTimeString() + '.' + d.getMilliseconds()
+        const hh = String(d.getHours()).padStart(2, '0');
+        const mm = String(d.getMinutes()).padStart(2, '0');
+        const ss = String(d.getSeconds()).padStart(2, '0');
+        return `${hh}:${mm}:${ss}`;
+      }
+
+
+      function appendGpuPoints(name, ts, memUsedList) {
+        const st = store[name];
+        if (!st) return;
+
+        const timeLabel = makeTimeLabel(ts);
+
+        // 如果 GPU 數量變了，先重建畫布
+        if (st.gpuCharts.length !== memUsedList.length) {
+          renderGpuCanvases(name, memUsedList.length);
+        }
+      
+        memUsedList.forEach((mb, idx) => {
+          const chart = st.gpuCharts[idx];
+          if (!chart) return;
+        
+          const labels = chart.data.labels;
+          const data = chart.data.datasets[0].data;
+        
+          if (labels.length && labels[labels.length - 1] === timeLabel) {
+            // 同一個時間標籤 → 覆寫最後一點
+            data[data.length - 1] = mb;
+          } else {
+            // 新時間標籤 → 直接 push
+            labels.push(timeLabel);
+            data.push(mb);
+            if (labels.length > 120) {
+              labels.shift();
+              data.shift();
+            }
+          }
+        
+          chart.update('none'); // 不要動畫，加快更新
+        });
+      }
+
+      
+
+      function updateCard(name, payload) {
+        let st = store[name];
+        const data = payload.metrics || payload;
+        if (!st) {
+          createServerCard(name, data);
+          st = store[name];
+        }
+      
+        const card = st.card;
+      
+        // 如果是錯誤（例如 SSH 連不上），直接標為離線
+        if (payload.error) {
+          // 記錄為沒有可用的最後成功時間
+          st.lastUpdateMs = null;
+          renderStatus(card, false);
+          // 額外把錯誤訊息放到 CPU 行方便排查
+          const cpuEl = card.querySelector('.cpu');
+          if (cpuEl) cpuEl.textContent = payload.error;
+          return;
+        }
+      
+        // 基本資訊
+        if (data.last_update) {
+          const d = new Date(data.last_update);
+          const dateStr = d.toISOString().split('T')[0];
+          const timeStr = d.toTimeString().split(' ')[0];
+          card.querySelector('.last-date').textContent = dateStr;
+          card.querySelector('.last-time').textContent = timeStr;
+        
+          // 記錄最後成功更新時間（之後定時器會用來判定離線）
+          st.lastUpdateMs = d.getTime();
+        } else {
+          card.querySelector('.last-date').textContent = '-';
+          card.querySelector('.last-time').textContent = '-';
+          st.lastUpdateMs = null;
+        }
+      
+        // 確認「資料沒過期」且「無錯誤」才判定為上線
+        const ageSec = (Date.now() - st.lastUpdateMs) / 1000;
+        const isExpired = ageSec > OFFLINE_SECS;
+        renderStatus(card, !isExpired && st.lastUpdateMs != null);
+
+        const cpuPct = data.cpu_usage_pct;
+        card.querySelector('.cpu').textContent = (cpuPct == null ? '-' : `${cpuPct.toFixed(1)}%`);
+        if (data.mem_total_mb != null) {
+          card.querySelector('.mem').textContent = `${data.mem_used_mb} / ${data.mem_total_mb} MB`;
+        } else {
+          card.querySelector('.mem').textContent = '-';
+        }
+
+        // 硬碟總容量/使用（彙總）
+        const diskTxt = (data.disk_total_h && data.disk_used_h)
+          ? `${data.disk_used_h} / ${data.disk_total_h}` + (data.disk_used_pct != null ? ` (${data.disk_used_pct}%)` : '')
+          : '-';
+        card.querySelector('.disk').textContent = diskTxt;
+
+        // GPU 列表摘要
+        if (data.gpus && data.gpus.length) {
+          card.querySelector('.gpus').textContent =
+            data.gpus.map((g, i) => {
+              const utilTxt = (g.util != null ? `${Math.round(g.util)}%` : '-');
+              const pwrTxt = (g.power_draw != null ? `${Math.round(g.power_draw)}W` : '-');
+              return `#${i} ${g.name} util:${utilTxt} power:${pwrTxt} mem:${g.mem_used}/${g.mem_total}MB`;
+            }).join(' | ');
+        } else {
+          card.querySelector('.gpus').textContent = 'none';
+        }
+
+        // GPU 名稱標題
+        const gpuGrid = card.querySelector('.gpu-grid');
+        if (data.gpus && data.gpus.length) {
+          if (store[name].gpuCharts.length !== data.gpus.length) {
+            renderGpuCanvases(name, data.gpus.length);
+          }
+          data.gpus.forEach((g, i) => {
+            const el = gpuGrid.querySelector(`.gpu-name-${i}`);
+            if (el) el.textContent = `(${g.name})`;
+
+            // 設定 y 軸上限為該 GPU 的最大記憶體
+            const chart = store[name].gpuCharts[i];
+            if (chart && g.mem_total) {
+              chart.options.scales.y.max = Number(g.mem_total);   // mem_total 單位通常是 MiB
+            }
+
+            // 使用率 (%)
+            const utilEl = gpuGrid.querySelector(`.gpu-util-${i}`);
+            if (utilEl) utilEl.textContent = (g.util != null ? `${g.util.toFixed(0)}%` : '-');
+
+            // 功耗 (W)（若同時有 power_limit 也順便顯示）
+            const pwrEl = gpuGrid.querySelector(`.gpu-power-${i}`);
+            if (pwrEl) {
+              if (g.power_draw != null && g.power_limit != null) {
+                pwrEl.textContent = `${g.power_draw.toFixed(0)} W / ${g.power_limit.toFixed(0)} W`;
+              } else if (g.power_draw != null) {
+                pwrEl.textContent = `${g.power_draw.toFixed(0)} W`;
+              } else {
+                pwrEl.textContent = '-';
+              }
+            }
+
+            // 渲染該 GPU 的 process 使用者清單
+            const list = gpuGrid.querySelector(`.proc-list-${i}`);
+            if (list) {
+              if (g.procs && g.procs.length) {
+                // 顯示前 5 個（可自行調）
+                const rows = g.procs.slice(0, 5).map(p => {
+                  const namePart = p.fullname ? `${p.user} (${p.fullname})` : p.user;
+                  const procName = p.proc ? p.proc.split('/').pop() : '';
+                  return `<div style="font-size:12px;line-height:1.3;">
+                            <code>${namePart}</code> • pid ${p.pid} • ${procName} • ${p.mem_used} MB
+                          </div>`;
+                }).join("");
+                list.innerHTML = rows;
+              } else {
+                list.innerHTML = `<div style="font-size:12px;color:#888;">(no processes)</div>`;
+              }
+            }
+          });
+
+          // 追加時間點（util 陣列）
+          appendGpuPoints(name, data.last_update || new Date().toISOString(), data.gpus.map(g => g.mem_used ?? 0));
+        } else {
+          renderGpuCanvases(name, 0);
+        }
+      }
+
+      // 初始載入（含歷史）
+      fetch('/api/servers').then(r => r.json()).then(data => {
+        Object.keys(data).forEach(k => {
+          const s = data[k];
+          createServerCard(k, s);
+          updateCard(k, s);
+          // 歷史：per-GPU util
+          const gpuHist = (s.history && s.history.gpus) ? s.history.gpus : [];
+          // 將歷史逐點灌入（時間順序）
+          const len = gpuHist.length ? gpuHist[0].length : 0;
+          for (let t = 0; t < len; t++) {
+            const mems = gpuHist.map(arr => (arr[t]?.mem_used ?? 0));
+            const ts = gpuHist[0][t]?.ts ?? new Date().toISOString();
+            appendGpuPoints(k, ts, mems);
+          }
+        });
+      });
+
+      let lastSocketTs = Date.now();
+      socket.on('server_update', msg => {
+        if (!msg || !msg.name) return;
+        lastSocketTs = Date.now();
+        updateCard(msg.name, msg);
+      });
+
+      // Fallback polling，每 5s 拉一次整體快照並更新
+      setInterval(() => {
+        fetch('/api/servers')
+          .then(r => r.json())
+          .then(all => {
+            Object.entries(all).forEach(([name, data]) => updateCard(name, data));
+          })
+          .catch(() => {});
+      }, 5000);
+
+      // 每 2 秒檢查一次每台 server 是否過久未更新 → 標成離線
+      setInterval(() => {
+        const now = Date.now();
+        Object.values(store).forEach(st => {
+          if (!st || !st.card) return;
+          const last = st.lastUpdateMs;
+          if (!last) {
+            // 沒有成功更新過就視為離線
+            renderStatus(st.card, false);
+            return;
+          }
+          const ageSec = (now - last) / 1000;
+          if (ageSec > OFFLINE_SECS) {
+            renderStatus(st.card, false);
+          } else {
+            renderStatus(st.card, true);
+          }
+        });
+      }, 2000);
+    </script>
+  </body>
+</html>

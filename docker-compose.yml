@@ -1,0 +1,20 @@
+services:
+  server-monitor:
+    build: .
+    container_name: server-monitor
+    restart: unless-stopped
+    ports:
+      # 只允許宿主機本機（127.0.0.1）連線，杜絕外網直接存取
+      # 建議使用反向代理（如 Nginx）或 SSH 隧道來存取服務
+      - "127.0.0.1:5000:5000"
+      # 連線到 host.docker.internal 以存取本機服務
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # 掛載設定檔，日後增減監控主機無需重新 build image
+      - ./servers.json:/app/servers.json:ro
+      # 若 servers.json 內有使用 private_key 指向本機私鑰，將金鑰以唯讀掛載
+      - ./monitor_key:/app/monitor_key:ro
+    environment:
+      # 設定時區，避免前端/日誌時間產生時差
+      - TZ=Asia/Taipei

@@ -1,0 +1,23 @@
+[
+  {
+    "name": "GPU-Server-Key (金鑰驗證)",
+    "host": "192.168.1.101",
+    "port": 2026,
+    "username": "lab_admin",
+    "private_key": "/app/monitor_key"
+  },
+  {
+    "name": "GPU-Server-Password (密碼驗證)",
+    "host": "192.168.1.102",
+    "port": 2026,
+    "username": "student",
+    "password": "your_secure_password_here"
+  },
+  {
+    "name": "Host-Local (宿主機本機)",
+    "host": "host.docker.internal",
+    "port": 2026,
+    "username": "lab_admin",
+    "private_key": "/app/monitor_key"
+  }
+]

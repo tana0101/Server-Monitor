@@ -1,0 +1,16 @@
+# 機密設定與金鑰
+servers.json
+server.json
+.env
+monitor_key*
+id_rsa*
+*.pem
+
+# Python 暫存檔
+__pycache__/
+*.pyc
+
+# 記錄檔與除錯輸出
+*.log
+error.txt
+log.txt
