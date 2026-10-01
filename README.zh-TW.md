@@ -2,24 +2,89 @@
 
 [English](README.md) | [繁體中文](README.zh-TW.md)
 
-輕量級的 Linux / NVIDIA GPU 伺服器即時監控儀表板，適合 AI、資料科學與研究室環境使用。
+**簡單、免費、不需要在每台主機安裝監控 Agent 的 Linux / NVIDIA GPU 多伺服器監控 Dashboard。**
 
-Server Monitor 會透過 SSH 連線至多台遠端伺服器，用網頁集中顯示 CPU、記憶體、硬碟、GPU 使用率、GPU 記憶體、功耗，以及目前占用 GPU 的使用者與行程資訊。
+Server Monitor 主要為研究室、AI 團隊，以及多人共用 GPU Server 的環境所設計，讓你可以快速知道：
+
+- 哪些 Server 現在正在使用？
+- 哪些 GPU 還是空閒的？
+- GPU 記憶體目前用了多少？
+- 現在是誰在使用 GPU？
+- 哪些 Process 正在占用 GPU？
+
+不需要在每一台 Server 額外安裝監控 Agent，也不需要建置複雜的監控架構。Server Monitor 直接透過既有的 SSH 連線取得各台 Server 的系統資訊，並集中顯示於同一個 Web Dashboard。
 
 ## Preview
 
 ![Server Monitor Dashboard](docs/dashboard.png)
 
+## 為什麼做 Server Monitor？
+
+最初開發 Server Monitor，是因為我想在研究室環境中快速查看多台共用 GPU Server 的使用狀況。
+
+現有的 Server Monitoring 工具功能通常非常完整，但對小型研究室或 AI 團隊來說，有時反而過於複雜。有些方案需要在每台 Server 安裝 Agent 或 Exporter，有些需要額外建置多個服務與設定監控架構，也有部分商業服務需要付費訂閱。
+
+但很多時候，我真正想知道的其實很簡單：
+
+> **這台 Server 現在有沒有人用？哪張 GPU 還有空？**
+
+因此 Server Monitor 專注在一個簡單的使用情境：
+
+> **只要能 SSH 進 Server，就能監控 Server。**
+
+不需要在每台被監控主機額外安裝監控 Agent、不需要付費服務，也不需要先架設 Prometheus + Grafana。
+
+只需要在一台主機上執行 Server Monitor，設定欲監控的 Server，即可透過瀏覽器集中查看 CPU、Memory、Disk、GPU，以及目前使用 GPU 的 User 與 Process。
+
+## 主要特色
+
+- **Agentless Monitoring** — 被監控的 Server 不需要額外安裝監控 Agent
+- **SSH-based** — 直接使用原本就有的 SSH 連線
+- **Multi-server Dashboard** — 在同一個頁面查看多台 Server
+- **GPU 使用者資訊** — 查看目前是哪個 User / Process 正在占用 GPU
+- **免費且開源** — 不需要訂閱商業監控服務
+- **輕量部署** — 可使用 Docker Compose 或 Python 直接執行
+- **不需要複雜監控架構** — 不必額外架設 Prometheus 或 Grafana
+
 ## Features
 
-- 多台 Linux / GPU 伺服器集中監控
-- CPU、Memory、Disk 即時狀態
-- NVIDIA GPU 使用率、記憶體與功耗
-- GPU process、PID 與使用者資訊
+- 多台 Linux / NVIDIA GPU Server 集中監控
+- CPU、Memory、Disk 即時使用狀態
+- NVIDIA GPU 使用率、VRAM 與功耗
+- GPU Process、PID 與 User 資訊
 - 支援 SSH Key 與密碼驗證
 - WebSocket 即時更新，並提供 HTTP polling fallback
 - 支援 Docker Compose 快速部署
-- 可搭配 Nginx、Basic Auth 與 UFW 進行較安全的遠端部署
+- 可搭配 Nginx、Basic Auth 與 UFW 進行遠端部署
+
+## 運作方式
+
+Server Monitor 只需要部署在一台主機上，再透過 SSH 向其他 Server 取得系統資訊。
+
+```text
+                     ┌─────────────────────┐
+                     │   Server Monitor    │
+                     │    Web Dashboard    │
+                     └──────────┬──────────┘
+                                │
+                            SSH 連線
+                                │
+             ┌──────────────────┼──────────────────┐
+             │                  │                  │
+             ▼                  ▼                  ▼
+      GPU Server 01      GPU Server 02      GPU Server 03
+      CPU / Memory       CPU / Memory       CPU / Memory
+      Disk / GPU         Disk / GPU         Disk / GPU
+      User / Process     User / Process     User / Process
+```
+
+被監控的 Server 只需要：
+
+- 可正常使用的 SSH Server
+- `free`、`df`、`ps` 等基本 Linux 指令
+- 若需監控 NVIDIA GPU，可正常執行 `nvidia-smi`
+
+被監控端不需要另外部署專用的 Monitoring Agent。
 
 ---
 

@@ -2,25 +2,85 @@
 
 [English](README.md) | [繁體中文](README.zh-TW.md)
 
-A lightweight real-time monitoring dashboard for Linux and NVIDIA GPU servers, designed for AI, data science, and research lab environments.
+**A simple, free, and agentless dashboard for monitoring multiple Linux and NVIDIA GPU servers over SSH.**
 
-Server Monitor connects to multiple remote servers via SSH and provides a centralized web dashboard for monitoring CPU, memory, disk usage, GPU utilization, GPU memory, power consumption, and active GPU users and processes.
+Server Monitor is designed for research labs, AI teams, and small groups that share multiple GPU servers and simply want to know:
 
+- Which servers are currently busy?
+- Which GPUs are available?
+- How much GPU memory is being used?
+- Who is using each GPU?
+- Which processes are occupying GPU resources?
+
+Instead of installing monitoring agents on every server or setting up a complex monitoring stack, Server Monitor connects to your existing servers through SSH and displays their status in one centralized web dashboard.
 
 ## Preview
 
 ![Server Monitor Dashboard](docs/dashboard.png)
 
+## Why Server Monitor?
+
+I originally built Server Monitor because I wanted a simple way to check the status of several shared GPU servers in a lab environment.
+
+Many existing monitoring solutions are powerful, but for a small research lab or AI team they can be more than what is needed. Some require installing agents or exporters on every server, some involve multiple services and configuration steps, and some commercial solutions require a subscription.
+
+Server Monitor focuses on a simpler use case:
+
+> **If you can SSH into the server, you can monitor it.**
+
+There is no monitoring agent to install on each target server, no paid service required, and no Prometheus or Grafana stack required.
+
+Run Server Monitor on one machine, add your servers to the configuration file, and view their CPU, memory, disk, GPU, and active user information from a browser.
+
+### What makes it simple?
+
+- **Agentless monitoring** — no additional monitoring software needs to be installed on each target server
+- **SSH-based** — uses the SSH access you already have
+- **Multi-server dashboard** — check multiple servers from one page
+- **GPU-user visibility** — see which users and processes are occupying NVIDIA GPUs
+- **Free and open source** — no subscription or commercial monitoring service required
+- **Lightweight deployment** — run with Docker Compose or directly with Python
+- **No heavy monitoring stack required** — Prometheus and Grafana are not required
+
 ## Features
 
-- Centralized monitoring for multiple Linux / GPU servers
-- Real-time CPU, memory, and disk status
-- NVIDIA GPU utilization, memory usage, and power consumption
+- Centralized monitoring for multiple Linux / NVIDIA GPU servers
+- Real-time CPU, memory, and disk usage
+- NVIDIA GPU utilization, VRAM usage, and power consumption
 - GPU process, PID, and user information
-- Supports both SSH key and password authentication
+- SSH key and password authentication
 - Real-time updates via WebSocket with HTTP polling fallback
-- Fast deployment with Docker Compose
-- Optional Nginx, Basic Auth, and UFW setup for safer remote deployment
+- Docker Compose deployment
+- Optional Nginx, Basic Auth, and UFW configuration for remote deployment
+
+## How It Works
+
+Server Monitor runs on a single machine and retrieves system information from remote servers through SSH.
+
+```text
+                     ┌─────────────────────┐
+                     │   Server Monitor    │
+                     │    Web Dashboard    │
+                     └──────────┬──────────┘
+                                │
+                       SSH connections
+                                │
+             ┌──────────────────┼──────────────────┐
+             │                  │                  │
+             ▼                  ▼                  ▼
+      GPU Server 01      GPU Server 02      GPU Server 03
+      CPU / Memory       CPU / Memory       CPU / Memory
+      Disk / GPU         Disk / GPU         Disk / GPU
+      Users / Process    Users / Process    Users / Process
+```
+
+The monitored servers only need:
+
+- A working SSH server
+- Standard Linux commands such as `free`, `df`, and `ps`
+- `nvidia-smi` if NVIDIA GPU monitoring is required
+
+No dedicated monitoring agent is required on the target servers.
 
 ---
 
